@@ -108,10 +108,20 @@ def send_like():
         info_url = f"https://info-plum-six.vercel.app/get?uid={player_id}"
         resp = httpx.get(info_url, timeout=10)
         info_json = resp.json()
-        account_info = info_json.get("AccountInfo", {})
-        player_name = account_info.get("AccountName","Unknown")
-        player_uid = account_info.get("accountId",player_id_int)
-        likes_before = account_info.get("AccountLikes",0)
+        
+        # التعديل هنا: جلب اللايكات من المكان الجديد
+        captain_info = info_json.get("captainBasicInfo", {})
+        player_name = captain_info.get("nickname", "Unknown")
+        player_uid = captain_info.get("accountId", player_id_int)
+        likes_before = captain_info.get("liked", 0)
+        
+        # إذا لم توجد في captainBasicInfo، نحاول من مكان آخر
+        if likes_before == 0:
+            basic_info = info_json.get("AccountInfo", {})
+            player_name = basic_info.get("AccountName", "Unknown")
+            player_uid = basic_info.get("accountId", player_id_int)
+            likes_before = basic_info.get("AccountLikes", 0)
+            
     except Exception as e:
         return jsonify({"error": f"Error fetching player info: {e}"}), 500
 
@@ -134,7 +144,7 @@ def send_like():
             tokens_dict = token_data.get("tokens", {})
             token_items = list(tokens_dict.items())
             random.shuffle(token_items)
-            token_items = token_items[:500]  # 100 توكن جديدة في كل دورة
+            token_items = token_items[:500]  # 500 توكن جديدة في كل دورة
         except Exception as e:
             return jsonify({"error": f"Failed to fetch tokens: {e}"}), 500
 
@@ -160,8 +170,13 @@ def send_like():
     try:
         resp = httpx.get(info_url, timeout=10)
         info_json = resp.json()
-        account_info = info_json.get("AccountInfo", {})
-        likes_after = account_info.get("AccountLikes", likes_before)
+        captain_info = info_json.get("captainBasicInfo", {})
+        likes_after = captain_info.get("liked", likes_before)
+        
+        # إذا لم توجد في captainBasicInfo، نحاول من مكان آخر
+        if likes_after == likes_before:
+            basic_info = info_json.get("AccountInfo", {})
+            likes_after = basic_info.get("AccountLikes", likes_before)
     except Exception:
         likes_after = likes_before
 
@@ -179,9 +194,44 @@ def send_like():
         "likes_added": likes_added,
         "likes_after": likes_after,
         "seconds_until_next_allowed": 86400,
-        "success_tokens": results,
-        "failed_tokens": failed
+        "success_tokens": len(results),
+        "failed_tokens": len(failed)
     })
+
+@app.route("/check_likes", methods=["GET"])
+def check_likes():
+    """واجهة للتحقق من عدد اللايكات فقط"""
+    player_id = request.args.get("player_id")
+    if not player_id:
+        return jsonify({"error": "player_id is required"}), 400
+    
+    try:
+        info_url = f"https://info-eight-rho.vercel.app/get?uid={player_id}"
+        resp = httpx.get(info_url, timeout=10)
+        info_json = resp.json()
+        
+        # البحث في الهيكل الجديد
+        captain_info = info_json.get("captainBasicInfo", {})
+        player_name = captain_info.get("nickname", "Unknown")
+        player_uid = captain_info.get("accountId", player_id)
+        likes_count = captain_info.get("liked", 0)
+        
+        # خيار احتياطي
+        if likes_count == 0:
+            basic_info = info_json.get("AccountInfo", {})
+            player_name = basic_info.get("AccountName", "Unknown")
+            player_uid = basic_info.get("accountId", player_id)
+            likes_count = basic_info.get("AccountLikes", 0)
+            
+        return jsonify({
+            "player_id": player_uid,
+            "player_name": player_name,
+            "likes_count": likes_count,
+            "last_updated": time.time()
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Error fetching player info: {e}"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
